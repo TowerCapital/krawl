@@ -14,6 +14,9 @@ public class DiscoveryTest {
         String userId = args[0];
         int tcpPort = Integer.parseInt(args[1]);
 
+        // ── Message layer (sits above the networking layer) ──────────────────
+        MessageService messageService = new MessageService();
+
         PeerBroadcaster broadcaster =
                 new PeerBroadcaster(userId, "device-" + userId, tcpPort);
         PeerListener discovery = new PeerListener(userId);
@@ -35,7 +38,18 @@ public class DiscoveryTest {
 
                     @Override
                     public void onText(String peerId, String message) {
-                        System.out.println(peerId + ": " + message);
+                        // Try to decode as a MeshLink application message first.
+                        Message decoded = messageService.decodeFromTransport(message);
+                        if (decoded != null) {
+                            // Structured display for known message types.
+                            System.out.println();
+                            System.out.println("[" + decoded.getType() + "]");
+                            System.out.println(decoded.getSenderId() + " → " + decoded.getReceiverId());
+                            System.out.println(decoded.getPayload());
+                        } else {
+                            // Legacy / raw string — print as-is, never crash.
+                            System.out.println(peerId + " (raw): " + message);
+                        }
                     }
 
                     @Override
@@ -74,7 +88,10 @@ public class DiscoveryTest {
 
                 try {
                     if (parts.length == 3 && parts[0].equals("/msg")) {
-                        tcp.sendText(parts[1], parts[2]);
+                        // Route through the message layer before transport.
+                        Message msg = messageService.createChatMessage(userId, parts[1], parts[2]);
+                        String wire = messageService.encodeForTransport(msg);
+                        tcp.sendText(parts[1], wire);
                     } else if (parts.length == 3 && parts[0].equals("/file")) {
                         tcp.sendFile(parts[1], Paths.get(parts[2]));
                     } else {
