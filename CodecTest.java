@@ -23,7 +23,7 @@ public class CodecTest {
         for (String payload : payloads) {
             Message original = svc.createChatMessage("alice", "bob", payload);
             String wire = svc.encodeForTransport(original);
-            Message decoded = svc.decodeFromTransport(wire);
+            Message decoded = MessageCodec.decode(wire);
 
             if (decoded == null) {
                 System.out.println("FAIL [decode returned null]: " + payload);
@@ -51,7 +51,7 @@ public class CodecTest {
 
         // Also verify that a raw / legacy string safely returns null.
         String legacy = "Hello raw world!";
-        Message legacyDecoded = svc.decodeFromTransport(legacy);
+        Message legacyDecoded = MessageCodec.decode(legacy);
         if (legacyDecoded == null) {
             System.out.println("PASS (legacy/null): raw string correctly returns null");
             passed++;
