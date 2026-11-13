@@ -1,6 +1,8 @@
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.util.List;
 import java.util.Scanner;
 
@@ -9,11 +11,13 @@ import java.util.Scanner;
  *
  * Usage:
  *   java DiscoveryTest <userId> <tcpPort>
+ *   or: java DiscoveryTest <username> <password> <tcpPort>
  *
  * Phase 1 Commands (Data Structures: Tree, Queue, Trie, Stack):
  *   /msg <peerId> <message>   — send a structured CHAT message
  *   /file <peerId> <filePath> — send a file
  *   /peers                    — list discovered peers and connection status
+ *   /contacts                 — list persisted contacts with last-seen timestamps
  *   /messages <peerId>        — show stored messages with a peer
  *   /locate <id>              — General Tree: campus location hierarchy path
  *   /search <prefix>          — Trie: prefix-based room autocomplete
@@ -32,14 +36,63 @@ public class DiscoveryTest {
             throws IOException, InterruptedException {
         if (args.length < 2) {
             System.out.println("Usage: java DiscoveryTest <userId> <tcpPort>");
+            System.out.println("   or: java DiscoveryTest <username> <password> <tcpPort>");
             return;
         }
 
-        String userId = args[0];
-        int    tcpPort = Integer.parseInt(args[1]);
+        String username;
+        String password;
+        int tcpPort;
+
+        if (args.length >= 3) {
+            username = args[0];
+            password = args[1];
+            tcpPort  = Integer.parseInt(args[2]);
+        } else {
+            username = args[0];
+            password = "password123";
+            tcpPort  = Integer.parseInt(args[1]);
+        }
+
+        // ── Local Authentication & Persistence Layer ────────────────────────
+        DatabaseConnection dbConn = new DatabaseConnection();
+        UserRepository userRepo = new JdbcUserRepository(dbConn);
+        ContactRepository contactRepo = new JdbcContactRepository(dbConn);
+        ConversationRepository convRepo = new JdbcConversationRepository(dbConn);
+        MessageRepository messageRepo = new JdbcMessageRepository(dbConn);
+        AuthService authService = new AuthService(userRepo);
+
+        String userId;
+        boolean dbActive = false;
+
+        try {
+            if (dbConn.isReachable(2)) {
+                User authUser;
+                try {
+                    authUser = authService.login(username, password);
+                    System.out.println("[AUTH] Authenticated user: " + authUser.getUsername() + " (" + authUser.getUserId() + ")");
+                } catch (AuthException e) {
+                    System.out.println("[AUTH] Registering new account for: " + username);
+                    authUser = authService.register(username, password);
+                    System.out.println("[AUTH] Registered and logged in: " + authUser.getUsername() + " (" + authUser.getUserId() + ")");
+                }
+                userId = authUser.getUserId();
+                dbActive = true;
+            } else {
+                System.out.println("[AUTH] Local MySQL not reachable; using in-memory mode.");
+                userId = username.toLowerCase();
+            }
+        } catch (Exception e) {
+            System.err.println("[AUTH] Database notice: " + e.getMessage() + ". Running in fallback mode.");
+            userId = username.toLowerCase();
+        }
+
+        final String finalUserId = userId;
 
         // ── Message layer (sits ABOVE the networking layer) ─────────────────
-        MessageService messageService = new MessageService();
+        MessageService messageService = dbActive
+                ? new MessageService(messageRepo, convRepo, finalUserId)
+                : new MessageService();
 
         // ── Campus Data Structures Layer (Parth's Module - Phase 1) ────────
         CampusTree campusTree = new CampusTree();
@@ -54,18 +107,44 @@ public class DiscoveryTest {
         // ── Advanced Data Structures Layer (Parth's Module - Phase 2) ──────
         PeerRegistry peerRegistry = new PeerRegistry();
         PriorityMessageQueue priorityQueue = new PriorityMessageQueue();
-        ConversationManager conversationManager = new ConversationManager(userId);
+        ConversationManager conversationManager = new ConversationManager(finalUserId);
         PeerGraph peerGraph = new PeerGraph();
-        peerGraph.addPeer(userId);
+        peerGraph.addPeer(finalUserId);
+
+        // ── History Reconstruction & Failed-Message Recovery ───────────────
+        if (dbActive) {
+            try {
+                ConversationHistoryService historyService = new ConversationHistoryService(convRepo, messageRepo);
+                int restoredMsgs    = historyService.reconstructConversations(conversationManager, finalUserId);
+                int recoveredFailed = historyService.recoverFailedMessages(messageBuffer, finalUserId);
+                // Crash-window recovery: messages persisted as CREATED but never marked SENT/FAILED
+                int recoveredCreated = historyService.recoverCreatedMessages(messageBuffer, finalUserId);
+                if (restoredMsgs > 0) {
+                    System.out.println("[PERSISTENCE] Reconstructed " + restoredMsgs + " message(s) into conversation threads.");
+                }
+                if (recoveredFailed > 0) {
+                    System.out.println("[PERSISTENCE] Restored " + recoveredFailed + " FAILED message(s) into offline retry buffer.");
+                }
+                if (recoveredCreated > 0) {
+                    System.out.println("[PERSISTENCE] Recovered " + recoveredCreated
+                            + " CREATED message(s) from crash window into offline retry buffer.");
+                    System.out.println("[PERSISTENCE] Note: If a recovered message was already delivered, the recipient");
+                    System.out.println("[PERSISTENCE] will silently deduplicate it via its database primary key.");
+                }
+            } catch (SQLException e) {
+                System.err.println("[PERSISTENCE] Warning during history reconstruction: " + e.getMessage());
+            }
+        }
 
         // ── Networking layer ────────────────────────────────────────────────
         PeerBroadcaster broadcaster =
-                new PeerBroadcaster(userId, "device-" + userId, tcpPort);
-        PeerListener discovery = new PeerListener(userId);
+                new PeerBroadcaster(finalUserId, "device-" + finalUserId, tcpPort);
+        PeerListener discovery = new PeerListener(finalUserId);
 
         final PeerConnectionManager[] tcpHolder = new PeerConnectionManager[1];
+        final boolean isDbActive = dbActive;
         PeerConnectionManager tcp = new PeerConnectionManager(
-                userId,
+                finalUserId,
                 tcpPort,
                 Paths.get("received"),
                 new PeerConnectionManager.Listener() {
@@ -77,7 +156,15 @@ public class DiscoveryTest {
 
                         // Phase 2: Update PeerRegistry status & PeerGraph topology
                         peerRegistry.markOnline(peerId);
-                        peerGraph.addEdge(userId, peerId);
+                        peerGraph.addEdge(finalUserId, peerId);
+
+                        // Phase 3: Update contacts repository
+                        if (isDbActive) {
+                            try {
+                                contactRepo.addContact(finalUserId, peerId, null);
+                                contactRepo.updateLastSeen(finalUserId, peerId, new Timestamp(System.currentTimeMillis()));
+                            } catch (SQLException ignored) {}
+                        }
 
                         // Flush any pending messages buffered while peer was offline
                         if (messageBuffer.hasPending(peerId)) {
@@ -92,10 +179,15 @@ public class DiscoveryTest {
                                     }
                                     messageService.markSent(m);
                                     conversationManager.record(peerId, m);
+                                    if (isDbActive) {
+                                        contactRepo.updateLastSeen(finalUserId, peerId, new Timestamp(System.currentTimeMillis()));
+                                    }
                                     System.out.println("  ✓ Sent queued msg: " + m.getPayload());
                                 } catch (IOException e) {
                                     messageService.markFailed(m);
                                     System.err.println("  ✗ Delivery failed: " + e.getMessage());
+                                } catch (SQLException e) {
+                                    System.err.println("  ✗ Contact update error: " + e.getMessage());
                                 }
                             }
                         }
@@ -108,17 +200,23 @@ public class DiscoveryTest {
 
                         // Phase 2: Update PeerRegistry status & PeerGraph topology
                         peerRegistry.markOffline(peerId);
-                        peerGraph.removeEdge(userId, peerId);
+                        peerGraph.removeEdge(finalUserId, peerId);
                     }
 
                     @Override
                     public void onText(String peerId, String wire) {
-                        // Hand off entirely to the message layer.
+                        // Hand off to the message layer (decodes & persists with RECEIVED status)
                         Message decoded = messageService.receive(wire);
 
                         if (decoded != null) {
-                            // Valid, non-duplicate MeshLink message.
+                            // Valid, persisted, non-duplicate MeshLink message -> record in memory
                             conversationManager.record(peerId, decoded);
+                            if (isDbActive) {
+                                try {
+                                    contactRepo.addContact(finalUserId, peerId, null);
+                                    contactRepo.updateLastSeen(finalUserId, peerId, new Timestamp(System.currentTimeMillis()));
+                                } catch (SQLException ignored) {}
+                            }
                             System.out.println();
                             System.out.println("[RECEIVE]");
                             System.out.println("  Type   : " + decoded.getType());
@@ -185,7 +283,7 @@ public class DiscoveryTest {
 
                             // 1. Create & store (CREATED)
                             Message msg = messageService.createChatMessage(
-                                    userId, peerId, text);
+                                    finalUserId, peerId, text);
 
                             // 2. Encode
                             String wire = messageService.encodeForTransport(msg);
@@ -249,6 +347,27 @@ public class DiscoveryTest {
                                             + ":" + p.tcpPort
                                             + " [" + status + "]");
                                 }
+                            }
+                            break;
+                        }
+
+                        // ── /contacts (Persisted Contacts) ────────────────
+                        case "/contacts": {
+                            System.out.println();
+                            if (isDbActive) {
+                                List<Contact> contacts = contactRepo.listContacts(finalUserId);
+                                if (contacts.isEmpty()) {
+                                    System.out.println("[CONTACTS] No saved contacts in database.");
+                                } else {
+                                    System.out.println("[CONTACTS] Saved contacts for " + finalUserId + ":");
+                                    for (Contact c : contacts) {
+                                        System.out.println("  - " + c.getPeerId()
+                                                + (c.getDisplayName() != null ? " (" + c.getDisplayName() + ")" : "")
+                                                + " | Last seen: " + c.getLastSeenAt());
+                                    }
+                                }
+                            } else {
+                                System.out.println("[CONTACTS] Database offline; see /peers for active LAN peers.");
                             }
                             break;
                         }
@@ -393,7 +512,7 @@ public class DiscoveryTest {
                             String peerId = parts[1];
                             String text   = "[URGENT] " + parts[2];
 
-                            Message msg = messageService.createChatMessage(userId, peerId, text);
+                            Message msg = messageService.createChatMessage(finalUserId, peerId, text);
                             priorityQueue.insert(msg, MessagePriority.URGENT);
                             PriorityMessage pm = priorityQueue.extractMin();
 
@@ -437,7 +556,7 @@ public class DiscoveryTest {
                                 System.out.println("[CONVERSATION THREAD - Doubly-Linked List] Last "
                                         + history.size() + " messages with " + peerId + ":");
                                 for (Message m : history) {
-                                    String dir = m.getSenderId().equalsIgnoreCase(userId) ? "OUT" : "IN ";
+                                    String dir = m.getSenderId().equalsIgnoreCase(finalUserId) ? "OUT" : "IN ";
                                     System.out.println("  [" + dir + "] " + m.getSenderId() + " → "
                                             + m.getReceiverId() + " : " + m.getPayload()
                                             + " (" + m.getStatus() + ")");
