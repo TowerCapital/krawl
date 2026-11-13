@@ -27,21 +27,24 @@ import java.util.List;
 public class MeshLinkGUI extends JFrame {
 
     // ── Palette ──────────────────────────────────────────────────────────────
-    private static final Color BG_DEEP        = new Color(0x0F, 0x10, 0x14);
-    private static final Color BG_PANEL       = new Color(0x16, 0x18, 0x1E);
-    private static final Color BG_SIDEBAR     = new Color(0x12, 0x14, 0x1A);
-    private static final Color BG_INPUT       = new Color(0x1C, 0x1F, 0x28);
-    private static final Color BG_BUBBLE_SENT = new Color(0x1D, 0x6F, 0xFF);
-    private static final Color BG_BUBBLE_RECV = new Color(0x25, 0x29, 0x35);
-    private static final Color BG_HOVER       = new Color(0x1E, 0x22, 0x2E);
-    private static final Color BG_SEL         = new Color(0x1D, 0x6F, 0xFF, 80);
-    private static final Color ACCENT         = new Color(0x1D, 0x6F, 0xFF);
-    private static final Color ACCENT_GLOW    = new Color(0x4D, 0x9F, 0xFF);
-    private static final Color TEXT_PRI       = new Color(0xE8, 0xEC, 0xF1);
-    private static final Color TEXT_SEC       = new Color(0x7A, 0x82, 0x96);
-    private static final Color TEXT_MUTED     = new Color(0x4A, 0x52, 0x66);
-    private static final Color ONLINE_DOT     = new Color(0x22, 0xD3, 0x6A);
-    private static final Color BORDER_SUB     = new Color(0x22, 0x26, 0x30);
+    private static final Color BG_DEEP        = new Color(0x10, 0x10, 0x0F);
+    private static final Color BG_PANEL       = new Color(0x1C, 0x1B, 0x19);
+    private static final Color BG_SIDEBAR     = new Color(0x10, 0x10, 0x0F);
+    private static final Color BG_INPUT       = new Color(0x29, 0x27, 0x23);
+    private static final Color BG_CARD        = new Color(0x29, 0x27, 0x23);
+    private static final Color BG_CARD_ALT    = new Color(0x51, 0x42, 0x2D);
+    private static final Color BG_BUBBLE_SENT = new Color(0x51, 0x42, 0x2D);
+    private static final Color BG_BUBBLE_RECV = new Color(0x29, 0x27, 0x23);
+    private static final Color BG_HOVER       = new Color(0x36, 0x32, 0x2A);
+    private static final Color BG_SEL         = new Color(0x89, 0x70, 0x44, 150);
+    private static final Color ACCENT         = new Color(0x89, 0x70, 0x44);
+    private static final Color ACCENT_GLOW    = new Color(0xC5, 0xA6, 0x6D);
+    private static final Color ACCENT_CYAN    = new Color(0xC5, 0xA6, 0x6D);
+    private static final Color TEXT_PRI       = new Color(0xF1, 0xED, 0xE4);
+    private static final Color TEXT_SEC       = new Color(0xC5, 0xB9, 0xA6);
+    private static final Color TEXT_MUTED     = new Color(0x9C, 0x91, 0x81);
+    private static final Color ONLINE_DOT     = new Color(0xC5, 0xA6, 0x6D);
+    private static final Color BORDER_SUB     = new Color(0x4A, 0x42, 0x36);
 
     // ── Fonts ────────────────────────────────────────────────────────────────
     private static final Font FONT_BODY  = new Font("Segoe UI", Font.PLAIN, 14);
@@ -72,6 +75,7 @@ public class MeshLinkGUI extends JFrame {
     private final JButton    sendBtn;
     private final JButton    fileBtn;
     private final JLabel     statusLabel;
+    private final JLabel     peerCountLabel;
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -91,42 +95,79 @@ public class MeshLinkGUI extends JFrame {
         setBackground(BG_DEEP);
 
         // ── Root ─────────────────────────────────────────────────────────
-        JPanel root = new JPanel(new BorderLayout());
+        JPanel root = new GradientPanel(BG_DEEP, new Color(0x1C, 0x1A, 0x16), true);
+        root.setLayout(new BorderLayout());
         root.setBackground(BG_DEEP);
         setContentPane(root);
 
         // ══════════════════════════════════════════════════════════════════
         //  SIDEBAR
         // ══════════════════════════════════════════════════════════════════
-        JPanel sidebar = new JPanel(new BorderLayout());
+        JPanel sidebar = new GradientPanel(BG_SIDEBAR, new Color(0x1C, 0x1A, 0x16), false);
+        sidebar.setLayout(new BorderLayout());
         sidebar.setBackground(BG_SIDEBAR);
         sidebar.setPreferredSize(new Dimension(250, 0));
         sidebar.setBorder(new MatteBorder(0, 0, 0, 1, BORDER_SUB));
 
         // header
-        JPanel sideHeader = new JPanel();
+        JPanel sideHeader = new JPanel(new BorderLayout(12, 0));
         sideHeader.setLayout(new BoxLayout(sideHeader, BoxLayout.Y_AXIS));
         sideHeader.setBackground(BG_SIDEBAR);
-        sideHeader.setBorder(new EmptyBorder(18, 16, 14, 16));
+        sideHeader.setBorder(new EmptyBorder(18, 16, 16, 16));
+
+        JPanel brandRow = new JPanel(new BorderLayout(10, 0));
+        brandRow.setOpaque(false);
+
+        JLabel logo = new JLabel("M", SwingConstants.CENTER);
+        logo.setFont(new Font("Segoe UI", Font.BOLD, 18));
+        logo.setForeground(Color.WHITE);
+        logo.setBackground(ACCENT);
+        logo.setOpaque(true);
+        logo.setPreferredSize(new Dimension(38, 38));
+
+        JPanel brandText = new JPanel();
+        brandText.setOpaque(false);
+        brandText.setLayout(new BoxLayout(brandText, BoxLayout.Y_AXIS));
 
         JLabel appTitle = new JLabel("MeshLink");
-        appTitle.setFont(FONT_TITLE);
-        appTitle.setForeground(ACCENT_GLOW);
+        appTitle.setFont(new Font("Segoe UI", Font.BOLD, 19));
+        appTitle.setForeground(TEXT_PRI);
 
         JLabel myUser = new JLabel("@" + userId);
         myUser.setFont(FONT_SMALL);
         myUser.setForeground(TEXT_SEC);
 
-        sideHeader.add(appTitle);
-        sideHeader.add(Box.createVerticalStrut(3));
-        sideHeader.add(myUser);
+        brandText.add(appTitle);
+        brandText.add(Box.createVerticalStrut(1));
+        brandText.add(myUser);
+        brandRow.add(logo, BorderLayout.WEST);
+        brandRow.add(brandText, BorderLayout.CENTER);
+
+        JPanel networkCard = new JPanel(new BorderLayout());
+        networkCard.setBackground(BG_CARD);
+        networkCard.setBorder(new CompoundBorder(
+                new LineBorder(BORDER_SUB, 1, true),
+                new EmptyBorder(9, 11, 9, 11)));
+
+        JLabel networkIcon = new JLabel("●");
+        networkIcon.setForeground(ONLINE_DOT);
+        networkIcon.setFont(new Font("Segoe UI", Font.PLAIN, 16));
+        peerCountLabel = new JLabel("  LAN discovery active");
+        peerCountLabel.setFont(FONT_SMALL);
+        peerCountLabel.setForeground(TEXT_SEC);
+        networkCard.add(networkIcon, BorderLayout.WEST);
+        networkCard.add(peerCountLabel, BorderLayout.CENTER);
+
+        sideHeader.add(brandRow);
+        sideHeader.add(Box.createVerticalStrut(16));
+        sideHeader.add(networkCard);
         sidebar.add(sideHeader, BorderLayout.NORTH);
 
         // section label
         JPanel peersSect = new JPanel(new BorderLayout());
         peersSect.setBackground(BG_SIDEBAR);
         peersSect.setBorder(new EmptyBorder(0, 16, 6, 16));
-        JLabel peersTitle = new JLabel("PEERS");
+        JLabel peersTitle = new JLabel("YOUR NETWORK  /  DISCOVERED");
         peersTitle.setFont(FONT_TINY);
         peersTitle.setForeground(TEXT_MUTED);
         peersSect.add(peersTitle, BorderLayout.WEST);
@@ -161,11 +202,13 @@ public class MeshLinkGUI extends JFrame {
         // ══════════════════════════════════════════════════════════════════
         //  CHAT AREA
         // ══════════════════════════════════════════════════════════════════
-        JPanel chatArea = new JPanel(new BorderLayout());
+        JPanel chatArea = new GradientPanel(BG_PANEL, new Color(0x14, 0x13, 0x11), false);
+        chatArea.setLayout(new BorderLayout());
         chatArea.setBackground(BG_PANEL);
 
         // chat header bar
-        JPanel chatHeader = new JPanel(new BorderLayout());
+        JPanel chatHeader = new GradientPanel(BG_PANEL, new Color(0x29, 0x27, 0x23), true);
+        chatHeader.setLayout(new BorderLayout(14, 0));
         chatHeader.setBackground(BG_PANEL);
         chatHeader.setBorder(new CompoundBorder(
                 new MatteBorder(0, 0, 1, 0, BORDER_SUB),
@@ -185,6 +228,13 @@ public class MeshLinkGUI extends JFrame {
         chatHeaderText.add(chatHeaderLabel);
         chatHeaderText.add(Box.createVerticalStrut(2));
         chatHeaderText.add(chatStatusLabel);
+        JLabel chatIcon = new JLabel("⌁", SwingConstants.CENTER);
+        chatIcon.setFont(new Font("Segoe UI", Font.BOLD, 24));
+        chatIcon.setForeground(ACCENT_CYAN);
+        chatIcon.setPreferredSize(new Dimension(34, 34));
+        chatIcon.setBackground(BG_CARD_ALT);
+        chatIcon.setOpaque(true);
+        chatHeader.add(chatIcon, BorderLayout.WEST);
         chatHeader.add(chatHeaderText, BorderLayout.CENTER);
         chatArea.add(chatHeader, BorderLayout.NORTH);
 
@@ -196,7 +246,8 @@ public class MeshLinkGUI extends JFrame {
         chatArea.add(chatStack, BorderLayout.CENTER);
 
         // input bar
-        JPanel inputBar = new JPanel(new BorderLayout(8, 0));
+        JPanel inputBar = new GradientPanel(BG_PANEL, new Color(0x14, 0x13, 0x11), true);
+        inputBar.setLayout(new BorderLayout(8, 0));
         inputBar.setBackground(BG_PANEL);
         inputBar.setBorder(new CompoundBorder(
                 new MatteBorder(1, 0, 0, 0, BORDER_SUB),
@@ -268,6 +319,9 @@ public class MeshLinkGUI extends JFrame {
         int total = peerModel.size();
         statusLabel.setText(total == 0 ? "Discovering peers…"
                 : total + " discovered, " + conn + " connected");
+        peerCountLabel.setText(total == 0
+                ? "  Waiting for nearby peers"
+                : "  " + conn + " connected  ·  " + total + " discovered");
     }
 
     // ── Peer selection ────────────────────────────────────────────────────────
@@ -431,7 +485,7 @@ public class MeshLinkGUI extends JFrame {
             boolean isSent   = sent || msg.getSenderId().equals(myUserId);
             String  time     = TIME_FMT.format(new Date(msg.getTimestamp()));
             Color   bgColor  = isSent ? BG_BUBBLE_SENT : BG_BUBBLE_RECV;
-            Color   txtColor = isSent ? Color.WHITE : new Color(0xD0, 0xD8, 0xE8);
+            Color   txtColor = isSent ? Color.WHITE : TEXT_PRI;
 
             JTextArea text = new JTextArea(msg.getPayload());
             text.setFont(FONT_BODY);
@@ -445,7 +499,7 @@ public class MeshLinkGUI extends JFrame {
 
             JLabel timeLbl = new JLabel(time + (isSent ? "  ✓" : ""));
             timeLbl.setFont(FONT_TINY);
-            timeLbl.setForeground(isSent ? new Color(0xBB, 0xDD, 0xFF) : TEXT_MUTED);
+            timeLbl.setForeground(isSent ? new Color(0xE3, 0xD4, 0xB8) : TEXT_MUTED);
             timeLbl.setAlignmentX(isSent ? Component.RIGHT_ALIGNMENT : Component.LEFT_ALIGNMENT);
 
             JPanel inner = new JPanel();
@@ -518,7 +572,7 @@ public class MeshLinkGUI extends JFrame {
 
             JLabel name = new JLabel(file.getFileName().toString());
             name.setFont(FONT_BOLD);
-            name.setForeground(new Color(0xD0, 0xD8, 0xE8));
+            name.setForeground(TEXT_PRI);
 
             JLabel sub = new JLabel("From " + peerId + "  •  saved to received/");
             sub.setFont(FONT_TINY);
@@ -631,25 +685,35 @@ public class MeshLinkGUI extends JFrame {
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
         p.add(Box.createVerticalGlue());
 
-        JLabel icon = new JLabel("💬");
-        icon.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 52));
+        RoundedPanel welcomeCard = new RoundedPanel(22, BG_CARD);
+        welcomeCard.setLayout(new BoxLayout(welcomeCard, BoxLayout.Y_AXIS));
+        welcomeCard.setBorder(new CompoundBorder(
+                new LineBorder(BORDER_SUB, 1, true),
+                new EmptyBorder(28, 44, 28, 44)));
+        welcomeCard.setAlignmentX(Component.CENTER_ALIGNMENT);
+        welcomeCard.setMaximumSize(new Dimension(520, 230));
+
+        JLabel icon = new JLabel("✦", SwingConstants.CENTER);
+        icon.setFont(new Font("Segoe UI", Font.BOLD, 42));
+        icon.setForeground(ACCENT_CYAN);
         icon.setAlignmentX(Component.CENTER_ALIGNMENT);
 
-        JLabel msg = new JLabel("Select a peer to start chatting");
+        JLabel msg = new JLabel("Your private mesh, connected");
         msg.setFont(FONT_BOLD);
-        msg.setForeground(TEXT_MUTED);
+        msg.setForeground(TEXT_PRI);
         msg.setAlignmentX(Component.CENTER_ALIGNMENT);
 
-        JLabel sub = new JLabel("Peers discovered via UDP broadcast appear in the sidebar");
+        JLabel sub = new JLabel("Choose a peer from your LAN to start a conversation");
         sub.setFont(FONT_SMALL);
         sub.setForeground(TEXT_MUTED);
         sub.setAlignmentX(Component.CENTER_ALIGNMENT);
 
-        p.add(icon);
-        p.add(Box.createVerticalStrut(14));
-        p.add(msg);
-        p.add(Box.createVerticalStrut(4));
-        p.add(sub);
+        welcomeCard.add(icon);
+        welcomeCard.add(Box.createVerticalStrut(12));
+        welcomeCard.add(msg);
+        welcomeCard.add(Box.createVerticalStrut(6));
+        welcomeCard.add(sub);
+        p.add(welcomeCard);
         p.add(Box.createVerticalGlue());
         return p;
     }
@@ -665,11 +729,13 @@ public class MeshLinkGUI extends JFrame {
     }
 
     private JButton buildSendButton() {
-        JButton btn = new JButton("Send");
+        JButton btn = new JButton("Send  ➤");
         btn.setFont(FONT_BOLD);
         btn.setForeground(Color.WHITE);
         btn.setBackground(ACCENT);
-        btn.setBorder(new EmptyBorder(9, 22, 9, 22));
+        btn.setBorder(new CompoundBorder(
+                new LineBorder(ACCENT_GLOW, 1, true),
+                new EmptyBorder(8, 18, 8, 18)));
         btn.setFocusPainted(false);
         btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         btn.addMouseListener(new MouseAdapter() {
@@ -685,7 +751,9 @@ public class MeshLinkGUI extends JFrame {
         btn.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 18));
         btn.setForeground(TEXT_SEC);
         btn.setBackground(BG_INPUT);
-        btn.setBorder(new EmptyBorder(6, 10, 6, 10));
+        btn.setBorder(new CompoundBorder(
+                new LineBorder(BORDER_SUB, 1, true),
+                new EmptyBorder(6, 10, 6, 10)));
         btn.setFocusPainted(false);
         btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         btn.addMouseListener(new MouseAdapter() {
@@ -699,7 +767,7 @@ public class MeshLinkGUI extends JFrame {
         bar.setBackground(BG_PANEL);
         bar.setUI(new javax.swing.plaf.basic.BasicScrollBarUI() {
             @Override protected void configureScrollBarColors() {
-                thumbColor = new Color(0x35, 0x3C, 0x52);
+                thumbColor = new Color(0x6B, 0x5B, 0x40);
                 trackColor = BG_PANEL;
             }
             @Override protected JButton createDecreaseButton(int o) { return zeroBtn(); }
@@ -711,8 +779,8 @@ public class MeshLinkGUI extends JFrame {
     }
 
     private static Color avatarColor(String userId) {
-        int h = Math.abs(userId.hashCode()) % 360;
-        return Color.getHSBColor(h / 360f, 0.55f, 0.58f);
+        return (Math.abs(userId.hashCode()) % 2 == 0)
+                ? ACCENT : new Color(0xA6, 0x88, 0x57);
     }
 
     // ── Rounded bubble panel ──────────────────────────────────────────────────
@@ -726,6 +794,30 @@ public class MeshLinkGUI extends JFrame {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g2.setColor(bg);
             g2.fillRoundRect(0, 0, getWidth(), getHeight(), radius * 2, radius * 2);
+            g2.dispose();
+            super.paintComponent(g);
+        }
+    }
+
+    private static class GradientPanel extends JPanel {
+        private final Color start;
+        private final Color end;
+        private final boolean horizontal;
+
+        GradientPanel(Color start, Color end, boolean horizontal) {
+            this.start = start;
+            this.end = end;
+            this.horizontal = horizontal;
+            setOpaque(false);
+        }
+
+        @Override protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            int x2 = horizontal ? getWidth() : 0;
+            int y2 = horizontal ? 0 : getHeight();
+            g2.setPaint(new GradientPaint(0, 0, start, x2, y2, end));
+            g2.fillRect(0, 0, getWidth(), getHeight());
             g2.dispose();
             super.paintComponent(g);
         }
