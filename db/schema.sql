@@ -245,7 +245,10 @@ CREATE TABLE IF NOT EXISTS messages (
     stored_at           DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     -- Constraints
-    PRIMARY KEY (message_id),
+    -- Composite PK (message_id, local_user_id) allows both sender and receiver to store
+    -- their local perspective of the message independently, while preventing duplicate
+    -- reception by the same local user.
+    PRIMARY KEY (message_id, local_user_id),
 
     -- Composite FK: enforces that message belongs to a conversation owned
     -- by the EXACT same local user.

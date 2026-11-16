@@ -21,7 +21,8 @@ public class PeerListener implements Runnable {
 
     @Override
     public void run() {
-        try (DatagramSocket socket = new DatagramSocket(DISCOVERY_PORT)) {
+        // Use MulticastSocket so multiple peers running on the SAME computer can bind port 8888 (SO_REUSEADDR)
+        try (DatagramSocket socket = new MulticastSocket(DISCOVERY_PORT)) {
             byte[] buffer = new byte[1024];
 
             // background thread to clean out stale peers

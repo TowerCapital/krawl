@@ -5,6 +5,8 @@ import java.awt.event.*;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.List;
@@ -60,6 +62,7 @@ public class MeshLinkGUI extends JFrame {
     private final MessageService       messageService;
     private final PeerConnectionManager tcp;
     private final PeerListener         discovery;
+    private final ContactRepository    contactRepo;
 
     // ── UI ───────────────────────────────────────────────────────────────────
     private final DefaultListModel<PeerEntry> peerModel = new DefaultListModel<>();
@@ -83,11 +86,20 @@ public class MeshLinkGUI extends JFrame {
                        MessageService svc,
                        PeerConnectionManager tcpMgr,
                        PeerListener disc) {
+        this(userId, tcpPort, svc, tcpMgr, disc, null);
+    }
+
+    public MeshLinkGUI(String userId, int tcpPort,
+                       MessageService svc,
+                       PeerConnectionManager tcpMgr,
+                       PeerListener disc,
+                       ContactRepository contactRepo) {
         super("MeshLink — " + userId);
         this.myUserId       = userId;
         this.messageService = svc;
         this.tcp            = tcpMgr;
         this.discovery      = disc;
+        this.contactRepo    = contactRepo;
 
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setMinimumSize(new Dimension(820, 560));
@@ -353,6 +365,13 @@ public class MeshLinkGUI extends JFrame {
         if (text.isEmpty()) return;
         inputField.setText("");
 
+        if (contactRepo != null) {
+            try {
+                contactRepo.addContact(myUserId, activePeer, null);
+                contactRepo.updateLastSeen(myUserId, activePeer, new Timestamp(System.currentTimeMillis()));
+            } catch (SQLException ignored) {}
+        }
+
         ChatPane pane = chatPanes.get(activePeer);
         Message  msg  = messageService.createChatMessage(myUserId, activePeer, text);
         String   wire = messageService.encodeForTransport(msg);
@@ -394,6 +413,12 @@ public class MeshLinkGUI extends JFrame {
 
     void onIncomingText(String peerId, String wire) {
         Message msg = messageService.receive(wire);
+        if (contactRepo != null) {
+            try {
+                contactRepo.addContact(myUserId, peerId, null);
+                contactRepo.updateLastSeen(myUserId, peerId, new Timestamp(System.currentTimeMillis()));
+            } catch (SQLException ignored) {}
+        }
         SwingUtilities.invokeLater(() -> {
             ensureChatPane(peerId);
             ChatPane pane = chatPanes.get(peerId);
@@ -412,6 +437,12 @@ public class MeshLinkGUI extends JFrame {
     }
 
     void onConnected(String peerId) {
+        if (contactRepo != null) {
+            try {
+                contactRepo.addContact(myUserId, peerId, null);
+                contactRepo.updateLastSeen(myUserId, peerId, new Timestamp(System.currentTimeMillis()));
+            } catch (SQLException ignored) {}
+        }
         SwingUtilities.invokeLater(() -> {
             ensureChatPane(peerId);
             ChatPane pane = chatPanes.get(peerId);
@@ -457,12 +488,24 @@ public class MeshLinkGUI extends JFrame {
             ChatPane p = new ChatPane();
             chatPanes.put(peerId, p);
             chatStack.add(p, peerId);
+
+            // Populate previous conversation history from MySQL if available
+            try {
+                List<Message> history = messageService.getMessagesWithPeer(peerId);
+                if (history != null && !history.isEmpty()) {
+                    for (Message m : history) {
+                        boolean isSent = m.getSenderId().equalsIgnoreCase(myUserId);
+                        p.addBubble(m, isSent);
+                    }
+                }
+            } catch (Exception ignored) {}
         }
     }
 
     private class ChatPane extends JPanel {
         private final JPanel      bubbles;
         private final JScrollPane scroll;
+        private final Set<String> displayedMessageIds = new HashSet<>();
 
         ChatPane() {
             setLayout(new BorderLayout());
@@ -482,7 +525,14 @@ public class MeshLinkGUI extends JFrame {
         }
 
         void addBubble(Message msg, boolean sent) {
-            boolean isSent   = sent || msg.getSenderId().equals(myUserId);
+            if (msg.getMessageId() != null) {
+                if (displayedMessageIds.contains(msg.getMessageId())) {
+                    return; // Prevent duplicate bubbles
+                }
+                displayedMessageIds.add(msg.getMessageId());
+            }
+
+            boolean isSent   = sent || msg.getSenderId().equalsIgnoreCase(myUserId);
             String  time     = TIME_FMT.format(new Date(msg.getTimestamp()));
             Color   bgColor  = isSent ? BG_BUBBLE_SENT : BG_BUBBLE_RECV;
             Color   txtColor = isSent ? Color.WHITE : TEXT_PRI;
@@ -841,24 +891,75 @@ public class MeshLinkGUI extends JFrame {
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
             System.out.println("Usage: java MeshLinkGUI <userId> <tcpPort>");
+            System.out.println("   or: java MeshLinkGUI <username> <password> <tcpPort>");
             return;
         }
 
-        String userId  = args[0];
-        int    tcpPort = Integer.parseInt(args[1]);
+        String username;
+        String password;
+        int    tcpPort;
+
+        if (args.length >= 3) {
+            username = args[0];
+            password = args[1];
+            tcpPort  = Integer.parseInt(args[2]);
+        } else {
+            username = args[0];
+            password = "password123";
+            tcpPort  = Integer.parseInt(args[1]);
+        }
 
         // Apply system look-and-feel before creating windows
         UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
 
-        MessageService   messageService = new MessageService();
-        PeerListener     discovery      = new PeerListener(userId);
-        PeerBroadcaster  broadcaster    = new PeerBroadcaster(userId, "device-" + userId, tcpPort);
+        // ── Local Authentication & Persistence Layer (MySQL) ────────────────
+        DatabaseConnection dbConn = new DatabaseConnection();
+        UserRepository userRepo = new JdbcUserRepository(dbConn);
+        ContactRepository contactRepo = new JdbcContactRepository(dbConn);
+        ConversationRepository convRepo = new JdbcConversationRepository(dbConn);
+        MessageRepository messageRepo = new JdbcMessageRepository(dbConn);
+        AuthService authService = new AuthService(userRepo);
+
+        String userId;
+        boolean dbActive = false;
+
+        try {
+            if (dbConn.isReachable(2)) {
+                User authUser;
+                try {
+                    authUser = authService.login(username, password);
+                    System.out.println("[AUTH] Authenticated user: " + authUser.getUsername() + " (" + authUser.getUserId() + ")");
+                } catch (AuthException e) {
+                    System.out.println("[AUTH] Registering new account for: " + username);
+                    authUser = authService.register(username, password);
+                    System.out.println("[AUTH] Registered and logged in: " + authUser.getUsername() + " (" + authUser.getUserId() + ")");
+                }
+                userId = authUser.getUserId();
+                dbActive = true;
+            } else {
+                System.out.println("[AUTH] Local MySQL not reachable; running in fallback mode.");
+                userId = username.toLowerCase();
+            }
+        } catch (Exception e) {
+            System.err.println("[AUTH] Database notice: " + e.getMessage() + ". Running in fallback mode.");
+            userId = username.toLowerCase();
+        }
+
+        final String finalUserId = userId;
+        final ContactRepository finalContactRepo = dbActive ? contactRepo : null;
+
+        MessageService messageService = dbActive
+                ? new MessageService(messageRepo, convRepo, finalUserId)
+                : new MessageService();
+
+        PeerListener     discovery      = new PeerListener(finalUserId);
+        PeerBroadcaster  broadcaster    = new PeerBroadcaster(finalUserId, "device-" + finalUserId, tcpPort);
 
         // GUI holder so the lambda can reference it after construction
         MeshLinkGUI[] guiHolder = new MeshLinkGUI[1];
 
         PeerConnectionManager tcp = new PeerConnectionManager(
-                userId, tcpPort, Paths.get("received"),
+                finalUserId, tcpPort, Paths.get("received"),
                 new PeerConnectionManager.Listener() {
                     @Override public void onConnected(String p)       { if (guiHolder[0] != null) guiHolder[0].onConnected(p); }
                     @Override public void onDisconnected(String p)    { if (guiHolder[0] != null) guiHolder[0].onDisconnected(p); }
@@ -873,7 +974,7 @@ public class MeshLinkGUI extends JFrame {
         new Thread(discovery,   "discovery").start();
 
         SwingUtilities.invokeAndWait(() ->
-                guiHolder[0] = new MeshLinkGUI(userId, tcpPort, messageService, tcp, discovery));
+                guiHolder[0] = new MeshLinkGUI(finalUserId, tcpPort, messageService, tcp, discovery, finalContactRepo));
 
         // discovery → connection loop (identical to DiscoveryTest)
         while (true) {
