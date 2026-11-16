@@ -5,6 +5,8 @@ import java.awt.event.*;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.List;
@@ -27,28 +29,31 @@ import java.util.List;
 public class MeshLinkGUI extends JFrame {
 
     // ── Palette ──────────────────────────────────────────────────────────────
-    private static final Color BG_DEEP        = new Color(0x0F, 0x10, 0x14);
-    private static final Color BG_PANEL       = new Color(0x16, 0x18, 0x1E);
-    private static final Color BG_SIDEBAR     = new Color(0x12, 0x14, 0x1A);
-    private static final Color BG_INPUT       = new Color(0x1C, 0x1F, 0x28);
-    private static final Color BG_BUBBLE_SENT = new Color(0x1D, 0x6F, 0xFF);
-    private static final Color BG_BUBBLE_RECV = new Color(0x25, 0x29, 0x35);
-    private static final Color BG_HOVER       = new Color(0x1E, 0x22, 0x2E);
-    private static final Color BG_SEL         = new Color(0x1D, 0x6F, 0xFF, 80);
-    private static final Color ACCENT         = new Color(0x1D, 0x6F, 0xFF);
-    private static final Color ACCENT_GLOW    = new Color(0x4D, 0x9F, 0xFF);
-    private static final Color TEXT_PRI       = new Color(0xE8, 0xEC, 0xF1);
-    private static final Color TEXT_SEC       = new Color(0x7A, 0x82, 0x96);
-    private static final Color TEXT_MUTED     = new Color(0x4A, 0x52, 0x66);
-    private static final Color ONLINE_DOT     = new Color(0x22, 0xD3, 0x6A);
-    private static final Color BORDER_SUB     = new Color(0x22, 0x26, 0x30);
+    private static final Color BG_DEEP        = new Color(0x10, 0x18, 0x27);
+    private static final Color BG_PANEL       = new Color(0x17, 0x24, 0x3A);
+    private static final Color BG_SIDEBAR     = new Color(0x10, 0x18, 0x27);
+    private static final Color BG_INPUT       = new Color(0x17, 0x24, 0x3A);
+    private static final Color BG_CARD        = new Color(0x1C, 0x2E, 0x45);
+    private static final Color BG_CARD_ALT    = new Color(0x23, 0x4B, 0x75);
+    private static final Color BG_BUBBLE_SENT = new Color(0x28, 0x7C, 0x68);
+    private static final Color BG_BUBBLE_RECV = new Color(0x23, 0x4B, 0x75);
+    private static final Color BG_HOVER       = new Color(0x1D, 0x38, 0x55);
+    private static final Color BG_SEL         = new Color(0x23, 0x4B, 0x75);
+    private static final Color ACCENT         = new Color(0xD6, 0xB7, 0x79);
+    private static final Color ACCENT_GLOW    = new Color(0xE8, 0xD2, 0x9E);
+    private static final Color ACCENT_CYAN    = new Color(0x28, 0x7C, 0x68);
+    private static final Color TEXT_PRI       = new Color(0xF2, 0xEB, 0xDD);
+    private static final Color TEXT_SEC       = new Color(0xA7, 0xB1, 0xBE);
+    private static final Color TEXT_MUTED     = new Color(0x78, 0x89, 0x9C);
+    private static final Color ONLINE_DOT     = new Color(0x67, 0xC6, 0xA2);
+    private static final Color BORDER_SUB     = new Color(0x2B, 0x43, 0x5E);
 
     // ── Fonts ────────────────────────────────────────────────────────────────
-    private static final Font FONT_BODY  = new Font("Segoe UI", Font.PLAIN, 14);
-    private static final Font FONT_BOLD  = new Font("Segoe UI", Font.BOLD,  14);
-    private static final Font FONT_SMALL = new Font("Segoe UI", Font.PLAIN, 12);
-    private static final Font FONT_TINY  = new Font("Segoe UI", Font.PLAIN, 10);
-    private static final Font FONT_TITLE = new Font("Segoe UI", Font.BOLD,  16);
+    private static final Font FONT_BODY  = new Font("Inter", Font.PLAIN, 14);
+    private static final Font FONT_BOLD  = new Font("Inter", Font.BOLD,  14);
+    private static final Font FONT_SMALL = new Font("Inter", Font.PLAIN, 12);
+    private static final Font FONT_TINY  = new Font("Inter", Font.PLAIN, 10);
+    private static final Font FONT_TITLE = new Font("Inter", Font.BOLD,  16);
 
     private static final SimpleDateFormat TIME_FMT = new SimpleDateFormat("HH:mm");
 
@@ -57,9 +62,11 @@ public class MeshLinkGUI extends JFrame {
     private final MessageService       messageService;
     private final PeerConnectionManager tcp;
     private final PeerListener         discovery;
+    private final ContactRepository    contactRepo;
 
     // ── UI ───────────────────────────────────────────────────────────────────
     private final DefaultListModel<PeerEntry> peerModel = new DefaultListModel<>();
+    private final Map<String, PeerEntry>       peerEntries = new LinkedHashMap<>();
     private final Map<String, ChatPane>       chatPanes = new LinkedHashMap<>();
     private final JPanel                      chatStack;
     private final CardLayout                  cardLayout = new CardLayout();
@@ -72,6 +79,8 @@ public class MeshLinkGUI extends JFrame {
     private final JButton    sendBtn;
     private final JButton    fileBtn;
     private final JLabel     statusLabel;
+    private final JLabel     peerCountLabel;
+    private final JTextField peerSearchField;
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -79,11 +88,20 @@ public class MeshLinkGUI extends JFrame {
                        MessageService svc,
                        PeerConnectionManager tcpMgr,
                        PeerListener disc) {
+        this(userId, tcpPort, svc, tcpMgr, disc, null);
+    }
+
+    public MeshLinkGUI(String userId, int tcpPort,
+                       MessageService svc,
+                       PeerConnectionManager tcpMgr,
+                       PeerListener disc,
+                       ContactRepository contactRepo) {
         super("MeshLink — " + userId);
         this.myUserId       = userId;
         this.messageService = svc;
         this.tcp            = tcpMgr;
         this.discovery      = disc;
+        this.contactRepo    = contactRepo;
 
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setMinimumSize(new Dimension(820, 560));
@@ -91,41 +109,80 @@ public class MeshLinkGUI extends JFrame {
         setBackground(BG_DEEP);
 
         // ── Root ─────────────────────────────────────────────────────────
-        JPanel root = new JPanel(new BorderLayout());
+        JPanel root = new GradientPanel(BG_DEEP, new Color(0x14, 0x22, 0x35), false);
+        root.setLayout(new BorderLayout());
         root.setBackground(BG_DEEP);
         setContentPane(root);
 
         // ══════════════════════════════════════════════════════════════════
         //  SIDEBAR
         // ══════════════════════════════════════════════════════════════════
-        JPanel sidebar = new JPanel(new BorderLayout());
+        JPanel sidebar = new GradientPanel(BG_SIDEBAR, new Color(0x13, 0x25, 0x38), false);
+        sidebar.setLayout(new BorderLayout());
         sidebar.setBackground(BG_SIDEBAR);
         sidebar.setPreferredSize(new Dimension(250, 0));
         sidebar.setBorder(new MatteBorder(0, 0, 0, 1, BORDER_SUB));
 
         // header
-        JPanel sideHeader = new JPanel();
+        JPanel sideHeader = new JPanel(new BorderLayout(12, 0));
         sideHeader.setLayout(new BoxLayout(sideHeader, BoxLayout.Y_AXIS));
         sideHeader.setBackground(BG_SIDEBAR);
-        sideHeader.setBorder(new EmptyBorder(18, 16, 14, 16));
+        sideHeader.setBorder(new EmptyBorder(18, 16, 16, 16));
+
+        JPanel brandRow = new JPanel(new BorderLayout(10, 0));
+        brandRow.setOpaque(false);
+
+        JLabel logo = new JLabel("M", SwingConstants.CENTER);
+        logo.setFont(new Font("Inter", Font.BOLD, 18));
+        logo.setForeground(BG_DEEP);
+        logo.setBackground(ACCENT);
+        logo.setOpaque(true);
+        logo.setPreferredSize(new Dimension(38, 38));
+
+        JPanel brandText = new JPanel();
+        brandText.setOpaque(false);
+        brandText.setLayout(new BoxLayout(brandText, BoxLayout.Y_AXIS));
 
         JLabel appTitle = new JLabel("MeshLink");
-        appTitle.setFont(FONT_TITLE);
-        appTitle.setForeground(ACCENT_GLOW);
+        appTitle.setFont(new Font("Inter", Font.BOLD, 19));
+        appTitle.setForeground(TEXT_PRI);
 
         JLabel myUser = new JLabel("@" + userId);
         myUser.setFont(FONT_SMALL);
         myUser.setForeground(TEXT_SEC);
 
-        sideHeader.add(appTitle);
-        sideHeader.add(Box.createVerticalStrut(3));
-        sideHeader.add(myUser);
+        brandText.add(appTitle);
+        brandText.add(Box.createVerticalStrut(1));
+        brandText.add(myUser);
+        brandRow.add(logo, BorderLayout.WEST);
+        brandRow.add(brandText, BorderLayout.CENTER);
+
+        JPanel networkCard = new GradientPanel(BG_CARD, new Color(0x12, 0x3C, 0x35), true);
+        networkCard.setLayout(new BorderLayout());
+        networkCard.setBorder(new CompoundBorder(
+                new LineBorder(BORDER_SUB, 1, true),
+                new EmptyBorder(9, 11, 9, 11)));
+
+        JLabel networkIcon = new JLabel(new DotIcon(ONLINE_DOT, 8));
+        peerCountLabel = new JLabel("LAN discovery active");
+        peerCountLabel.setFont(FONT_SMALL);
+        peerCountLabel.setForeground(TEXT_SEC);
+        networkCard.add(networkIcon, BorderLayout.WEST);
+        networkCard.add(peerCountLabel, BorderLayout.CENTER);
+
+        sideHeader.add(brandRow);
+        sideHeader.add(Box.createVerticalStrut(16));
+        sideHeader.add(networkCard);
         sidebar.add(sideHeader, BorderLayout.NORTH);
+
+        peerSearchField = new JTextField();
+        styleSearchField(peerSearchField);
+        peerSearchField.setToolTipText("Search peers");
 
         // section label
         JPanel peersSect = new JPanel(new BorderLayout());
         peersSect.setBackground(BG_SIDEBAR);
-        peersSect.setBorder(new EmptyBorder(0, 16, 6, 16));
+        peersSect.setBorder(new EmptyBorder(14, 16, 8, 16));
         JLabel peersTitle = new JLabel("PEERS");
         peersTitle.setFont(FONT_TINY);
         peersTitle.setForeground(TEXT_MUTED);
@@ -137,7 +194,7 @@ public class MeshLinkGUI extends JFrame {
         peerList.setSelectionBackground(BG_SEL);
         peerList.setSelectionForeground(TEXT_PRI);
         peerList.setBorder(null);
-        peerList.setFixedCellHeight(64);
+        peerList.setFixedCellHeight(68);
         peerList.setCellRenderer(new PeerCellRenderer());
         peerList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
 
@@ -153,7 +210,12 @@ public class MeshLinkGUI extends JFrame {
 
         JPanel sideBody = new JPanel(new BorderLayout());
         sideBody.setBackground(BG_SIDEBAR);
-        sideBody.add(peersSect,  BorderLayout.NORTH);
+        JPanel peerTools = new JPanel(new BorderLayout(0, 10));
+        peerTools.setBackground(BG_SIDEBAR);
+        peerTools.setBorder(new EmptyBorder(0, 16, 0, 16));
+        peerTools.add(peerSearchField, BorderLayout.NORTH);
+        peerTools.add(peersSect, BorderLayout.SOUTH);
+        sideBody.add(peerTools,  BorderLayout.NORTH);
         sideBody.add(peerScroll, BorderLayout.CENTER);
         sideBody.add(statusLabel, BorderLayout.SOUTH);
         sidebar.add(sideBody, BorderLayout.CENTER);
@@ -161,11 +223,13 @@ public class MeshLinkGUI extends JFrame {
         // ══════════════════════════════════════════════════════════════════
         //  CHAT AREA
         // ══════════════════════════════════════════════════════════════════
-        JPanel chatArea = new JPanel(new BorderLayout());
+        JPanel chatArea = new GradientPanel(BG_PANEL, new Color(0x14, 0x2F, 0x3A), false);
+        chatArea.setLayout(new BorderLayout());
         chatArea.setBackground(BG_PANEL);
 
         // chat header bar
-        JPanel chatHeader = new JPanel(new BorderLayout());
+        JPanel chatHeader = new GradientPanel(new Color(0x23, 0x4B, 0x75), BG_PANEL, true);
+        chatHeader.setLayout(new BorderLayout(14, 0));
         chatHeader.setBackground(BG_PANEL);
         chatHeader.setBorder(new CompoundBorder(
                 new MatteBorder(0, 0, 1, 0, BORDER_SUB),
@@ -185,6 +249,12 @@ public class MeshLinkGUI extends JFrame {
         chatHeaderText.add(chatHeaderLabel);
         chatHeaderText.add(Box.createVerticalStrut(2));
         chatHeaderText.add(chatStatusLabel);
+        JLabel chatIcon = new JLabel(new LinkIcon(ACCENT_CYAN));
+        chatIcon.setForeground(ACCENT_CYAN);
+        chatIcon.setPreferredSize(new Dimension(34, 34));
+        chatIcon.setBackground(BG_CARD_ALT);
+        chatIcon.setOpaque(true);
+        chatHeader.add(chatIcon, BorderLayout.WEST);
         chatHeader.add(chatHeaderText, BorderLayout.CENTER);
         chatArea.add(chatHeader, BorderLayout.NORTH);
 
@@ -196,7 +266,8 @@ public class MeshLinkGUI extends JFrame {
         chatArea.add(chatStack, BorderLayout.CENTER);
 
         // input bar
-        JPanel inputBar = new JPanel(new BorderLayout(8, 0));
+        JPanel inputBar = new GradientPanel(BG_PANEL, new Color(0x12, 0x3C, 0x35), true);
+        inputBar.setLayout(new BorderLayout(8, 0));
         inputBar.setBackground(BG_PANEL);
         inputBar.setBorder(new CompoundBorder(
                 new MatteBorder(1, 0, 0, 0, BORDER_SUB),
@@ -206,7 +277,7 @@ public class MeshLinkGUI extends JFrame {
         styleInputField(inputField);
         inputField.setEnabled(false);
 
-        fileBtn = buildIconButton("📎", "Send File");
+        fileBtn = buildIconButton(new PaperclipIcon(TEXT_SEC), "Send File");
         fileBtn.setEnabled(false);
 
         sendBtn = buildSendButton();
@@ -231,6 +302,11 @@ public class MeshLinkGUI extends JFrame {
         inputField.addActionListener(e -> sendMessage());
         sendBtn.addActionListener(e -> sendMessage());
         fileBtn.addActionListener(e -> sendFile());
+        peerSearchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { updatePeerListView(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { updatePeerListView(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { updatePeerListView(); }
+        });
 
         // ── Peer discovery poll ───────────────────────────────────────────
         new javax.swing.Timer(1500, e -> refreshPeerList()).start();
@@ -244,30 +320,43 @@ public class MeshLinkGUI extends JFrame {
 
     private void refreshPeerList() {
         List<PeerListener.PeerInfo> discovered = discovery.getKnownPeers();
-        Set<String> known = new HashSet<>();
-        for (int i = 0; i < peerModel.size(); i++) known.add(peerModel.get(i).userId);
-
         for (PeerListener.PeerInfo info : discovered) {
-            if (!known.contains(info.userId)) {
-                peerModel.addElement(new PeerEntry(info));
+            PeerEntry entry = peerEntries.get(info.userId);
+            if (entry == null) {
+                entry = new PeerEntry(info);
+                peerEntries.put(info.userId, entry);
                 ensureChatPane(info.userId);
             } else {
-                for (int i = 0; i < peerModel.size(); i++) {
-                    PeerEntry pe = peerModel.get(i);
-                    if (pe.userId.equals(info.userId)) { pe.info = info; break; }
-                }
+                entry.info = info;
             }
+            entry.connected = tcp.isConnected(info.userId);
         }
-        for (int i = 0; i < peerModel.size(); i++) {
-            peerModel.get(i).connected = tcp.isConnected(peerModel.get(i).userId);
-        }
-        peerList.repaint();
+        updatePeerListView();
 
         long conn = 0;
-        for (int i = 0; i < peerModel.size(); i++) if (peerModel.get(i).connected) conn++;
-        int total = peerModel.size();
+        for (PeerEntry entry : peerEntries.values()) if (entry.connected) conn++;
+        int total = peerEntries.size();
         statusLabel.setText(total == 0 ? "Discovering peers…"
                 : total + " discovered, " + conn + " connected");
+        peerCountLabel.setText(total == 0
+                ? "Waiting for nearby peers"
+                : conn + " connected  ·  " + total + " discovered");
+    }
+
+    private void updatePeerListView() {
+        String query = peerSearchField.getText().trim().toLowerCase(Locale.ROOT);
+        PeerEntry selected = peerList.getSelectedValue();
+        peerModel.clear();
+        List<PeerEntry> visible = new ArrayList<>();
+        for (PeerEntry entry : peerEntries.values()) {
+            if (query.isEmpty() || entry.userId.toLowerCase(Locale.ROOT).contains(query)) {
+                visible.add(entry);
+            }
+        }
+        visible.sort((a, b) -> Boolean.compare(b.connected, a.connected));
+        for (PeerEntry entry : visible) peerModel.addElement(entry);
+        if (selected != null && visible.contains(selected)) peerList.setSelectedValue(selected, true);
+        peerList.repaint();
     }
 
     // ── Peer selection ────────────────────────────────────────────────────────
@@ -282,8 +371,8 @@ public class MeshLinkGUI extends JFrame {
         chatHeaderLabel.setText(sel.userId);
         boolean conn = sel.connected;
         chatStatusLabel.setText(conn
-                ? "● Connected  •  " + sel.info.address.getHostAddress() + ":" + sel.info.tcpPort
-                : "○ Discovered  •  " + sel.info.address.getHostAddress() + ":" + sel.info.tcpPort);
+                ? "Connected  ·  " + sel.info.address.getHostAddress() + ":" + sel.info.tcpPort
+                : "Discovered  ·  " + sel.info.address.getHostAddress() + ":" + sel.info.tcpPort);
         chatStatusLabel.setForeground(conn ? ONLINE_DOT : TEXT_SEC);
         inputField.setEnabled(conn);
         sendBtn.setEnabled(conn);
@@ -298,6 +387,13 @@ public class MeshLinkGUI extends JFrame {
         String text = inputField.getText().trim();
         if (text.isEmpty()) return;
         inputField.setText("");
+
+        if (contactRepo != null) {
+            try {
+                contactRepo.addContact(myUserId, activePeer, null);
+                contactRepo.updateLastSeen(myUserId, activePeer, new Timestamp(System.currentTimeMillis()));
+            } catch (SQLException ignored) {}
+        }
 
         ChatPane pane = chatPanes.get(activePeer);
         Message  msg  = messageService.createChatMessage(myUserId, activePeer, text);
@@ -329,7 +425,7 @@ public class MeshLinkGUI extends JFrame {
             SwingUtilities.invokeLater(() -> { if (pane != null) pane.addNotice("Sending " + file.getFileName() + "…"); });
             try {
                 tcp.sendFile(activePeer, file);
-                SwingUtilities.invokeLater(() -> { if (pane != null) pane.addNotice("✓ File sent: " + file.getFileName()); });
+                SwingUtilities.invokeLater(() -> { if (pane != null) pane.addNotice("File sent: " + file.getFileName()); });
             } catch (IOException ex) {
                 SwingUtilities.invokeLater(() -> { if (pane != null) pane.addError("File failed: " + ex.getMessage()); });
             }
@@ -340,6 +436,12 @@ public class MeshLinkGUI extends JFrame {
 
     void onIncomingText(String peerId, String wire) {
         Message msg = messageService.receive(wire);
+        if (contactRepo != null) {
+            try {
+                contactRepo.addContact(myUserId, peerId, null);
+                contactRepo.updateLastSeen(myUserId, peerId, new Timestamp(System.currentTimeMillis()));
+            } catch (SQLException ignored) {}
+        }
         SwingUtilities.invokeLater(() -> {
             ensureChatPane(peerId);
             ChatPane pane = chatPanes.get(peerId);
@@ -358,17 +460,22 @@ public class MeshLinkGUI extends JFrame {
     }
 
     void onConnected(String peerId) {
+        if (contactRepo != null) {
+            try {
+                contactRepo.addContact(myUserId, peerId, null);
+                contactRepo.updateLastSeen(myUserId, peerId, new Timestamp(System.currentTimeMillis()));
+            } catch (SQLException ignored) {}
+        }
         SwingUtilities.invokeLater(() -> {
             ensureChatPane(peerId);
             ChatPane pane = chatPanes.get(peerId);
-            if (pane != null) pane.addNotice("● Connected to " + peerId);
-            for (int i = 0; i < peerModel.size(); i++) {
-                if (peerModel.get(i).userId.equals(peerId)) { peerModel.get(i).connected = true; break; }
-            }
-            peerList.repaint();
+            if (pane != null) pane.addNotice("Connected to " + peerId);
+            PeerEntry entry = peerEntries.get(peerId);
+            if (entry != null) entry.connected = true;
+            updatePeerListView();
             if (peerId.equals(activePeer)) {
                 inputField.setEnabled(true); sendBtn.setEnabled(true); fileBtn.setEnabled(true);
-                chatStatusLabel.setText("● Connected"); chatStatusLabel.setForeground(ONLINE_DOT);
+                chatStatusLabel.setText("Connected"); chatStatusLabel.setForeground(ONLINE_DOT);
             }
         });
     }
@@ -376,14 +483,13 @@ public class MeshLinkGUI extends JFrame {
     void onDisconnected(String peerId) {
         SwingUtilities.invokeLater(() -> {
             ChatPane pane = chatPanes.get(peerId);
-            if (pane != null) pane.addNotice("○ Disconnected from " + peerId);
-            for (int i = 0; i < peerModel.size(); i++) {
-                if (peerModel.get(i).userId.equals(peerId)) { peerModel.get(i).connected = false; break; }
-            }
-            peerList.repaint();
+            if (pane != null) pane.addNotice("Disconnected from " + peerId);
+            PeerEntry entry = peerEntries.get(peerId);
+            if (entry != null) entry.connected = false;
+            updatePeerListView();
             if (peerId.equals(activePeer)) {
                 inputField.setEnabled(false); sendBtn.setEnabled(false); fileBtn.setEnabled(false);
-                chatStatusLabel.setText("○ Disconnected"); chatStatusLabel.setForeground(TEXT_SEC);
+                chatStatusLabel.setText("Disconnected"); chatStatusLabel.setForeground(TEXT_SEC);
             }
         });
     }
@@ -403,12 +509,24 @@ public class MeshLinkGUI extends JFrame {
             ChatPane p = new ChatPane();
             chatPanes.put(peerId, p);
             chatStack.add(p, peerId);
+
+            // Populate previous conversation history from MySQL if available
+            try {
+                List<Message> history = messageService.getMessagesWithPeer(peerId);
+                if (history != null && !history.isEmpty()) {
+                    for (Message m : history) {
+                        boolean isSent = m.getSenderId().equalsIgnoreCase(myUserId);
+                        p.addBubble(m, isSent);
+                    }
+                }
+            } catch (Exception ignored) {}
         }
     }
 
     private class ChatPane extends JPanel {
         private final JPanel      bubbles;
         private final JScrollPane scroll;
+        private final Set<String> displayedMessageIds = new HashSet<>();
 
         ChatPane() {
             setLayout(new BorderLayout());
@@ -428,10 +546,17 @@ public class MeshLinkGUI extends JFrame {
         }
 
         void addBubble(Message msg, boolean sent) {
-            boolean isSent   = sent || msg.getSenderId().equals(myUserId);
+            if (msg.getMessageId() != null) {
+                if (displayedMessageIds.contains(msg.getMessageId())) {
+                    return; // Prevent duplicate bubbles
+                }
+                displayedMessageIds.add(msg.getMessageId());
+            }
+
+            boolean isSent   = sent || msg.getSenderId().equalsIgnoreCase(myUserId);
             String  time     = TIME_FMT.format(new Date(msg.getTimestamp()));
             Color   bgColor  = isSent ? BG_BUBBLE_SENT : BG_BUBBLE_RECV;
-            Color   txtColor = isSent ? Color.WHITE : new Color(0xD0, 0xD8, 0xE8);
+            Color   txtColor = isSent ? Color.WHITE : TEXT_PRI;
 
             JTextArea text = new JTextArea(msg.getPayload());
             text.setFont(FONT_BODY);
@@ -443,9 +568,9 @@ public class MeshLinkGUI extends JFrame {
             text.setOpaque(false);
             text.setBorder(null);
 
-            JLabel timeLbl = new JLabel(time + (isSent ? "  ✓" : ""));
+            JLabel timeLbl = new JLabel(time + (isSent ? "  sent" : ""));
             timeLbl.setFont(FONT_TINY);
-            timeLbl.setForeground(isSent ? new Color(0xBB, 0xDD, 0xFF) : TEXT_MUTED);
+            timeLbl.setForeground(isSent ? new Color(0xD8, 0xE6, 0xD9) : TEXT_MUTED);
             timeLbl.setAlignmentX(isSent ? Component.RIGHT_ALIGNMENT : Component.LEFT_ALIGNMENT);
 
             JPanel inner = new JPanel();
@@ -492,9 +617,11 @@ public class MeshLinkGUI extends JFrame {
         }
 
         void addError(String txt) {
-            JLabel lbl = new JLabel("⚠  " + txt, SwingConstants.CENTER);
+            JLabel lbl = new JLabel(new AlertIcon(new Color(0xF0, 0x9A, 0xA5)));
+            lbl.setToolTipText(txt);
+            lbl.setText("  " + txt);
             lbl.setFont(FONT_SMALL);
-            lbl.setForeground(new Color(0xFF, 0x6B, 0x6B));
+            lbl.setForeground(new Color(0xE6, 0xA4, 0x8B));
             lbl.setAlignmentX(Component.CENTER_ALIGNMENT);
             JPanel row = new JPanel(new BorderLayout());
             row.setBackground(BG_PANEL);
@@ -509,8 +636,7 @@ public class MeshLinkGUI extends JFrame {
             card.setLayout(new BorderLayout(10, 0));
             card.setBorder(new EmptyBorder(10, 14, 10, 14));
 
-            JLabel icon = new JLabel("📄");
-            icon.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 22));
+            JLabel icon = new JLabel(new FileIcon(ACCENT_CYAN));
 
             JPanel info = new JPanel();
             info.setLayout(new BoxLayout(info, BoxLayout.Y_AXIS));
@@ -518,7 +644,7 @@ public class MeshLinkGUI extends JFrame {
 
             JLabel name = new JLabel(file.getFileName().toString());
             name.setFont(FONT_BOLD);
-            name.setForeground(new Color(0xD0, 0xD8, 0xE8));
+            name.setForeground(TEXT_PRI);
 
             JLabel sub = new JLabel("From " + peerId + "  •  saved to received/");
             sub.setFont(FONT_TINY);
@@ -574,7 +700,12 @@ public class MeshLinkGUI extends JFrame {
             PeerEntry pe = (PeerEntry) value;
 
             JPanel panel = new JPanel(new BorderLayout(10, 0));
-            panel.setBorder(new EmptyBorder(10, 14, 10, 14));
+            boolean firstDiscovered = !pe.connected && index > 0
+                    && ((PeerEntry) list.getModel().getElementAt(index - 1)).connected;
+            panel.setBorder(firstDiscovered
+                    ? new CompoundBorder(new MatteBorder(1, 0, 0, 0, BORDER_SUB),
+                    new EmptyBorder(10, 14, 10, 14))
+                    : new EmptyBorder(10, 14, 10, 14));
             panel.setBackground(isSelected ? BG_SEL : BG_SIDEBAR);
             panel.setOpaque(true);
 
@@ -584,8 +715,9 @@ public class MeshLinkGUI extends JFrame {
             avatar.setFont(FONT_BOLD);
             avatar.setForeground(Color.WHITE);
             avatar.setPreferredSize(new Dimension(38, 38));
-            avatar.setOpaque(true);
-            avatar.setBackground(avatarColor(pe.userId));
+            avatar.setOpaque(false);
+            avatar.setIcon(new AvatarIcon(avatarColor(pe.userId), initial));
+            avatar.setText("");
 
             // text
             JPanel textPanel = new JPanel();
@@ -597,7 +729,8 @@ public class MeshLinkGUI extends JFrame {
             nameLbl.setForeground(TEXT_PRI);
 
             JLabel statusLbl = new JLabel(
-                    (pe.connected ? "● Connected" : "○ Discovered"));
+                    (pe.connected ? "Connected" : "Discovered"),
+                    new DotIcon(pe.connected ? ONLINE_DOT : TEXT_MUTED, 6), SwingConstants.LEFT);
             statusLbl.setFont(FONT_SMALL);
             statusLbl.setForeground(pe.connected ? ONLINE_DOT : TEXT_MUTED);
 
@@ -631,25 +764,35 @@ public class MeshLinkGUI extends JFrame {
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
         p.add(Box.createVerticalGlue());
 
-        JLabel icon = new JLabel("💬");
-        icon.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 52));
+        RoundedPanel welcomeCard = new RoundedPanel(22, BG_CARD);
+        welcomeCard.setLayout(new BoxLayout(welcomeCard, BoxLayout.Y_AXIS));
+        welcomeCard.setBorder(new CompoundBorder(
+                new LineBorder(BORDER_SUB, 1, true),
+                new EmptyBorder(28, 44, 28, 44)));
+        welcomeCard.setAlignmentX(Component.CENTER_ALIGNMENT);
+        welcomeCard.setMaximumSize(new Dimension(520, 230));
+
+        JLabel icon = new JLabel(new SparkIcon(ACCENT_CYAN));
+        icon.setPreferredSize(new Dimension(38, 38));
+        icon.setForeground(ACCENT_CYAN);
         icon.setAlignmentX(Component.CENTER_ALIGNMENT);
 
-        JLabel msg = new JLabel("Select a peer to start chatting");
+        JLabel msg = new JLabel("Your private mesh, connected");
         msg.setFont(FONT_BOLD);
-        msg.setForeground(TEXT_MUTED);
+        msg.setForeground(TEXT_PRI);
         msg.setAlignmentX(Component.CENTER_ALIGNMENT);
 
-        JLabel sub = new JLabel("Peers discovered via UDP broadcast appear in the sidebar");
+        JLabel sub = new JLabel("Choose a peer from your LAN to start a conversation");
         sub.setFont(FONT_SMALL);
         sub.setForeground(TEXT_MUTED);
         sub.setAlignmentX(Component.CENTER_ALIGNMENT);
 
-        p.add(icon);
-        p.add(Box.createVerticalStrut(14));
-        p.add(msg);
-        p.add(Box.createVerticalStrut(4));
-        p.add(sub);
+        welcomeCard.add(icon);
+        welcomeCard.add(Box.createVerticalStrut(12));
+        welcomeCard.add(msg);
+        welcomeCard.add(Box.createVerticalStrut(6));
+        welcomeCard.add(sub);
+        p.add(welcomeCard);
         p.add(Box.createVerticalGlue());
         return p;
     }
@@ -662,35 +805,82 @@ public class MeshLinkGUI extends JFrame {
         field.setBorder(new CompoundBorder(
                 new LineBorder(BORDER_SUB, 1, true),
                 new EmptyBorder(8, 12, 8, 12)));
+        field.addFocusListener(new FocusAdapter() {
+            @Override public void focusGained(FocusEvent e) {
+                field.setBorder(new CompoundBorder(
+                        new LineBorder(ACCENT_CYAN, 1, true),
+                        new EmptyBorder(8, 12, 8, 12)));
+            }
+            @Override public void focusLost(FocusEvent e) {
+                field.setBorder(new CompoundBorder(
+                        new LineBorder(BORDER_SUB, 1, true),
+                        new EmptyBorder(8, 12, 8, 12)));
+            }
+        });
+    }
+
+    private void styleSearchField(JTextField field) {
+        field.setFont(FONT_SMALL);
+        field.setForeground(TEXT_PRI);
+        field.setBackground(BG_INPUT);
+        field.setCaretColor(ACCENT_GLOW);
+        field.setBorder(new CompoundBorder(
+                new LineBorder(BORDER_SUB, 1, true),
+                new EmptyBorder(7, 10, 7, 10)));
+        field.addFocusListener(new FocusAdapter() {
+            @Override public void focusGained(FocusEvent e) {
+                field.setBorder(new CompoundBorder(
+                        new LineBorder(ACCENT, 1, true),
+                        new EmptyBorder(7, 10, 7, 10)));
+            }
+            @Override public void focusLost(FocusEvent e) {
+                field.setBorder(new CompoundBorder(
+                        new LineBorder(BORDER_SUB, 1, true),
+                        new EmptyBorder(7, 10, 7, 10)));
+            }
+        });
     }
 
     private JButton buildSendButton() {
-        JButton btn = new JButton("Send");
+        JButton btn = new JButton("Send", new SendIcon(BG_DEEP));
         btn.setFont(FONT_BOLD);
-        btn.setForeground(Color.WHITE);
+        btn.setForeground(BG_DEEP);
         btn.setBackground(ACCENT);
-        btn.setBorder(new EmptyBorder(9, 22, 9, 22));
+        btn.setBorder(new CompoundBorder(
+                new LineBorder(ACCENT, 1, true),
+                new EmptyBorder(8, 18, 8, 18)));
         btn.setFocusPainted(false);
         btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         btn.addMouseListener(new MouseAdapter() {
             @Override public void mouseEntered(MouseEvent e) { if (btn.isEnabled()) btn.setBackground(ACCENT_GLOW); }
             @Override public void mouseExited(MouseEvent e)  { btn.setBackground(ACCENT); }
+            @Override public void mousePressed(MouseEvent e) { if (btn.isEnabled()) btn.setBackground(new Color(0xB7, 0x96, 0x5D)); }
         });
         return btn;
     }
 
-    private JButton buildIconButton(String emoji, String tip) {
-        JButton btn = new JButton(emoji);
+    private JButton buildIconButton(Icon icon, String tip) {
+        JButton btn = new JButton(icon);
         btn.setToolTipText(tip);
-        btn.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 18));
         btn.setForeground(TEXT_SEC);
         btn.setBackground(BG_INPUT);
-        btn.setBorder(new EmptyBorder(6, 10, 6, 10));
+        btn.setBorder(new CompoundBorder(
+                new LineBorder(BORDER_SUB, 1, true),
+                new EmptyBorder(6, 10, 6, 10)));
         btn.setFocusPainted(false);
         btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         btn.addMouseListener(new MouseAdapter() {
-            @Override public void mouseEntered(MouseEvent e) { if (btn.isEnabled()) btn.setForeground(TEXT_PRI); }
-            @Override public void mouseExited(MouseEvent e)  { btn.setForeground(TEXT_SEC); }
+            @Override public void mouseEntered(MouseEvent e) {
+                if (btn.isEnabled()) {
+                    btn.setForeground(ACCENT_GLOW);
+                    btn.setBackground(BG_HOVER);
+                }
+            }
+            @Override public void mouseExited(MouseEvent e)  {
+                btn.setForeground(TEXT_SEC);
+                btn.setBackground(BG_INPUT);
+            }
+            @Override public void mousePressed(MouseEvent e) { if (btn.isEnabled()) btn.setBackground(BG_CARD_ALT); }
         });
         return btn;
     }
@@ -699,7 +889,7 @@ public class MeshLinkGUI extends JFrame {
         bar.setBackground(BG_PANEL);
         bar.setUI(new javax.swing.plaf.basic.BasicScrollBarUI() {
             @Override protected void configureScrollBarColors() {
-                thumbColor = new Color(0x35, 0x3C, 0x52);
+                thumbColor = new Color(0x28, 0x7C, 0x68);
                 trackColor = BG_PANEL;
             }
             @Override protected JButton createDecreaseButton(int o) { return zeroBtn(); }
@@ -711,8 +901,123 @@ public class MeshLinkGUI extends JFrame {
     }
 
     private static Color avatarColor(String userId) {
-        int h = Math.abs(userId.hashCode()) % 360;
-        return Color.getHSBColor(h / 360f, 0.55f, 0.58f);
+        return (Math.abs(userId.hashCode()) % 2 == 0)
+                ? new Color(0x28, 0x7C, 0x68) : new Color(0x23, 0x4B, 0x75);
+    }
+
+    private static class DotIcon implements Icon {
+        private final Color color;
+        private final int size;
+        DotIcon(Color color, int size) { this.color = color; this.size = size; }
+        public int getIconWidth() { return size + 8; }
+        public int getIconHeight() { return size; }
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            g.setColor(color);
+            g.fillOval(x + 2, y + (size - 6) / 2, 6, 6);
+        }
+    }
+
+    private static class AvatarIcon implements Icon {
+        private final Color color;
+        private final String initial;
+        AvatarIcon(Color color, String initial) { this.color = color; this.initial = initial; }
+        public int getIconWidth() { return 38; }
+        public int getIconHeight() { return 38; }
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(color);
+            g2.fillOval(x, y, 38, 38);
+            g2.setColor(Color.WHITE);
+            g2.setFont(FONT_BOLD);
+            FontMetrics fm = g2.getFontMetrics();
+            g2.drawString(initial, x + (38 - fm.stringWidth(initial)) / 2,
+                    y + (38 - fm.getHeight()) / 2 + fm.getAscent());
+            g2.dispose();
+        }
+    }
+
+    private abstract static class LineIcon implements Icon {
+        private final Color color;
+        LineIcon(Color color) { this.color = color; }
+        public int getIconWidth() { return 18; }
+        public int getIconHeight() { return 18; }
+        protected Graphics2D graphics(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setColor(color);
+            g2.setStroke(new BasicStroke(1.7f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            return g2;
+        }
+    }
+
+    private static class PaperclipIcon extends LineIcon {
+        PaperclipIcon(Color color) { super(color); }
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            Graphics2D g2 = graphics(g);
+            g2.drawArc(x + 5, y + 3, 8, 11, 45, 250);
+            g2.drawArc(x + 2, y + 1, 10, 14, 45, 250);
+            g2.dispose();
+        }
+    }
+
+    private static class SendIcon extends LineIcon {
+        SendIcon(Color color) { super(color); }
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            Graphics2D g2 = graphics(g);
+            g2.drawLine(x + 3, y + 9, x + 15, y + 3);
+            g2.drawLine(x + 15, y + 3, x + 12, y + 15);
+            g2.drawLine(x + 15, y + 3, x + 3, y + 7);
+            g2.drawLine(x + 3, y + 7, x + 7, y + 10);
+            g2.dispose();
+        }
+    }
+
+    private static class LinkIcon extends LineIcon {
+        LinkIcon(Color color) { super(color); }
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            Graphics2D g2 = graphics(g);
+            g2.drawOval(x + 1, y + 5, 9, 6);
+            g2.drawOval(x + 8, y + 5, 9, 6);
+            g2.drawLine(x + 7, y + 8, x + 11, y + 8);
+            g2.dispose();
+        }
+    }
+
+    private static class FileIcon extends LineIcon {
+        FileIcon(Color color) { super(color); }
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            Graphics2D g2 = graphics(g);
+            g2.drawRect(x + 4, y + 2, 10, 14);
+            g2.drawLine(x + 10, y + 2, x + 14, y + 6);
+            g2.drawLine(x + 10, y + 2, x + 10, y + 6);
+            g2.drawLine(x + 7, y + 10, x + 12, y + 10);
+            g2.dispose();
+        }
+    }
+
+    private static class AlertIcon extends LineIcon {
+        AlertIcon(Color color) { super(color); }
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            Graphics2D g2 = graphics(g);
+            Polygon p = new Polygon(new int[]{x + 9, x + 2, x + 16}, new int[]{y + 2, y + 16, y + 16}, 3);
+            g2.drawPolygon(p);
+            g2.drawLine(x + 9, y + 6, x + 9, y + 11);
+            g2.fillOval(x + 8, y + 13, 2, 2);
+            g2.dispose();
+        }
+    }
+
+    private static class SparkIcon extends LineIcon {
+        SparkIcon(Color color) { super(color); }
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            Graphics2D g2 = graphics(g);
+            g2.drawLine(x + 9, y + 1, x + 9, y + 17);
+            g2.drawLine(x + 1, y + 9, x + 17, y + 9);
+            g2.drawLine(x + 4, y + 4, x + 14, y + 14);
+            g2.drawLine(x + 14, y + 4, x + 4, y + 14);
+            g2.dispose();
+        }
     }
 
     // ── Rounded bubble panel ──────────────────────────────────────────────────
@@ -726,6 +1031,30 @@ public class MeshLinkGUI extends JFrame {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g2.setColor(bg);
             g2.fillRoundRect(0, 0, getWidth(), getHeight(), radius * 2, radius * 2);
+            g2.dispose();
+            super.paintComponent(g);
+        }
+    }
+
+    private static class GradientPanel extends JPanel {
+        private final Color start;
+        private final Color end;
+        private final boolean horizontal;
+
+        GradientPanel(Color start, Color end, boolean horizontal) {
+            this.start = start;
+            this.end = end;
+            this.horizontal = horizontal;
+            setOpaque(false);
+        }
+
+        @Override protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            int x2 = horizontal ? getWidth() : 0;
+            int y2 = horizontal ? 0 : getHeight();
+            g2.setPaint(new GradientPaint(0, 0, start, x2, y2, end));
+            g2.fillRect(0, 0, getWidth(), getHeight());
             g2.dispose();
             super.paintComponent(g);
         }
@@ -749,24 +1078,75 @@ public class MeshLinkGUI extends JFrame {
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
             System.out.println("Usage: java MeshLinkGUI <userId> <tcpPort>");
+            System.out.println("   or: java MeshLinkGUI <username> <password> <tcpPort>");
             return;
         }
 
-        String userId  = args[0];
-        int    tcpPort = Integer.parseInt(args[1]);
+        String username;
+        String password;
+        int    tcpPort;
+
+        if (args.length >= 3) {
+            username = args[0];
+            password = args[1];
+            tcpPort  = Integer.parseInt(args[2]);
+        } else {
+            username = args[0];
+            password = "password123";
+            tcpPort  = Integer.parseInt(args[1]);
+        }
 
         // Apply system look-and-feel before creating windows
         UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
 
-        MessageService   messageService = new MessageService();
-        PeerListener     discovery      = new PeerListener(userId);
-        PeerBroadcaster  broadcaster    = new PeerBroadcaster(userId, "device-" + userId, tcpPort);
+        // ── Local Authentication & Persistence Layer (MySQL) ────────────────
+        DatabaseConnection dbConn = new DatabaseConnection();
+        UserRepository userRepo = new JdbcUserRepository(dbConn);
+        ContactRepository contactRepo = new JdbcContactRepository(dbConn);
+        ConversationRepository convRepo = new JdbcConversationRepository(dbConn);
+        MessageRepository messageRepo = new JdbcMessageRepository(dbConn);
+        AuthService authService = new AuthService(userRepo);
+
+        String userId;
+        boolean dbActive = false;
+
+        try {
+            if (dbConn.isReachable(2)) {
+                User authUser;
+                try {
+                    authUser = authService.login(username, password);
+                    System.out.println("[AUTH] Authenticated user: " + authUser.getUsername() + " (" + authUser.getUserId() + ")");
+                } catch (AuthException e) {
+                    System.out.println("[AUTH] Registering new account for: " + username);
+                    authUser = authService.register(username, password);
+                    System.out.println("[AUTH] Registered and logged in: " + authUser.getUsername() + " (" + authUser.getUserId() + ")");
+                }
+                userId = authUser.getUserId();
+                dbActive = true;
+            } else {
+                System.out.println("[AUTH] Local MySQL not reachable; running in fallback mode.");
+                userId = username.toLowerCase();
+            }
+        } catch (Exception e) {
+            System.err.println("[AUTH] Database notice: " + e.getMessage() + ". Running in fallback mode.");
+            userId = username.toLowerCase();
+        }
+
+        final String finalUserId = userId;
+        final ContactRepository finalContactRepo = dbActive ? contactRepo : null;
+
+        MessageService messageService = dbActive
+                ? new MessageService(messageRepo, convRepo, finalUserId)
+                : new MessageService();
+
+        PeerListener     discovery      = new PeerListener(finalUserId);
+        PeerBroadcaster  broadcaster    = new PeerBroadcaster(finalUserId, "device-" + finalUserId, tcpPort);
 
         // GUI holder so the lambda can reference it after construction
         MeshLinkGUI[] guiHolder = new MeshLinkGUI[1];
 
         PeerConnectionManager tcp = new PeerConnectionManager(
-                userId, tcpPort, Paths.get("received"),
+                finalUserId, tcpPort, Paths.get("received"),
                 new PeerConnectionManager.Listener() {
                     @Override public void onConnected(String p)       { if (guiHolder[0] != null) guiHolder[0].onConnected(p); }
                     @Override public void onDisconnected(String p)    { if (guiHolder[0] != null) guiHolder[0].onDisconnected(p); }
@@ -781,7 +1161,7 @@ public class MeshLinkGUI extends JFrame {
         new Thread(discovery,   "discovery").start();
 
         SwingUtilities.invokeAndWait(() ->
-                guiHolder[0] = new MeshLinkGUI(userId, tcpPort, messageService, tcp, discovery));
+                guiHolder[0] = new MeshLinkGUI(finalUserId, tcpPort, messageService, tcp, discovery, finalContactRepo));
 
         // discovery → connection loop (identical to DiscoveryTest)
         while (true) {

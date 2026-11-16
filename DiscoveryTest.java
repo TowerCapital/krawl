@@ -10,26 +10,27 @@ import java.util.Scanner;
  * Entry point for the MeshLink two-device prototype.
  *
  * Usage:
- *   java DiscoveryTest <userId> <tcpPort>
- *   or: java DiscoveryTest <username> <password> <tcpPort>
+ * java DiscoveryTest <userId> <tcpPort>
+ * or: java DiscoveryTest <username> <password> <tcpPort>
  *
  * Phase 1 Commands (Data Structures: Tree, Queue, Trie, Stack):
- *   /msg <peerId> <message>   — send a structured CHAT message
- *   /file <peerId> <filePath> — send a file
- *   /peers                    — list discovered peers and connection status
- *   /contacts                 — list persisted contacts with last-seen timestamps
- *   /messages <peerId>        — show stored messages with a peer
- *   /locate <id>              — General Tree: campus location hierarchy path
- *   /search <prefix>          — Trie: prefix-based room autocomplete
- *   /nav <id> / /back         — Stack: breadcrumb navigation history
- *   /pending                  — Queue: offline pending message buffer
+ * /msg <peerId> <message> — send a structured CHAT message
+ * /file <peerId> <filePath> — send a file
+ * /peers — list discovered peers and connection status
+ * /contacts — list persisted contacts with last-seen timestamps
+ * /messages <peerId> — show stored messages with a peer
+ * /locate <id> — General Tree: campus location hierarchy path
+ * /search <prefix> — Trie: prefix-based room autocomplete
+ * /nav <id> / /back — Stack: breadcrumb navigation history
+ * /pending — Queue: offline pending message buffer
  *
- * Phase 2 Commands (Data Structures: HashMap, PriorityQueue, LinkedList, Graph):
- *   /whois <peerId>           — HashMap: peer presence registry lookup
- *   /urgent <peerId> <text>   — Priority Queue: send high-priority message
- *   /history <peerId> [n]     — Doubly-Linked List: last N conversation messages
- *   /network                  — Graph: show peer network topology
- *   /route <from> <to>        — Graph BFS: find shortest relay path between peers
+ * Phase 2 Commands (Data Structures: HashMap, PriorityQueue, LinkedList,
+ * Graph):
+ * /whois <peerId> — HashMap: peer presence registry lookup
+ * /urgent <peerId> <text> — Priority Queue: send high-priority message
+ * /history <peerId> [n] — Doubly-Linked List: last N conversation messages
+ * /network — Graph: show peer network topology
+ * /route <from> <to> — Graph BFS: find shortest relay path between peers
  */
 public class DiscoveryTest {
     public static void main(String[] args)
@@ -47,11 +48,11 @@ public class DiscoveryTest {
         if (args.length >= 3) {
             username = args[0];
             password = args[1];
-            tcpPort  = Integer.parseInt(args[2]);
+            tcpPort = Integer.parseInt(args[2]);
         } else {
             username = args[0];
             password = "password123";
-            tcpPort  = Integer.parseInt(args[1]);
+            tcpPort = Integer.parseInt(args[1]);
         }
 
         // ── Local Authentication & Persistence Layer ────────────────────────
@@ -70,11 +71,13 @@ public class DiscoveryTest {
                 User authUser;
                 try {
                     authUser = authService.login(username, password);
-                    System.out.println("[AUTH] Authenticated user: " + authUser.getUsername() + " (" + authUser.getUserId() + ")");
+                    System.out.println(
+                            "[AUTH] Authenticated user: " + authUser.getUsername() + " (" + authUser.getUserId() + ")");
                 } catch (AuthException e) {
                     System.out.println("[AUTH] Registering new account for: " + username);
                     authUser = authService.register(username, password);
-                    System.out.println("[AUTH] Registered and logged in: " + authUser.getUsername() + " (" + authUser.getUserId() + ")");
+                    System.out.println("[AUTH] Registered and logged in: " + authUser.getUsername() + " ("
+                            + authUser.getUserId() + ")");
                 }
                 userId = authUser.getUserId();
                 dbActive = true;
@@ -115,20 +118,24 @@ public class DiscoveryTest {
         if (dbActive) {
             try {
                 ConversationHistoryService historyService = new ConversationHistoryService(convRepo, messageRepo);
-                int restoredMsgs    = historyService.reconstructConversations(conversationManager, finalUserId);
+                int restoredMsgs = historyService.reconstructConversations(conversationManager, finalUserId);
                 int recoveredFailed = historyService.recoverFailedMessages(messageBuffer, finalUserId);
-                // Crash-window recovery: messages persisted as CREATED but never marked SENT/FAILED
+                // Crash-window recovery: messages persisted as CREATED but never marked
+                // SENT/FAILED
                 int recoveredCreated = historyService.recoverCreatedMessages(messageBuffer, finalUserId);
                 if (restoredMsgs > 0) {
-                    System.out.println("[PERSISTENCE] Reconstructed " + restoredMsgs + " message(s) into conversation threads.");
+                    System.out.println(
+                            "[PERSISTENCE] Reconstructed " + restoredMsgs + " message(s) into conversation threads.");
                 }
                 if (recoveredFailed > 0) {
-                    System.out.println("[PERSISTENCE] Restored " + recoveredFailed + " FAILED message(s) into offline retry buffer.");
+                    System.out.println("[PERSISTENCE] Restored " + recoveredFailed
+                            + " FAILED message(s) into offline retry buffer.");
                 }
                 if (recoveredCreated > 0) {
                     System.out.println("[PERSISTENCE] Recovered " + recoveredCreated
                             + " CREATED message(s) from crash window into offline retry buffer.");
-                    System.out.println("[PERSISTENCE] Note: If a recovered message was already delivered, the recipient");
+                    System.out
+                            .println("[PERSISTENCE] Note: If a recovered message was already delivered, the recipient");
                     System.out.println("[PERSISTENCE] will silently deduplicate it via its database primary key.");
                 }
             } catch (SQLException e) {
@@ -137,8 +144,7 @@ public class DiscoveryTest {
         }
 
         // ── Networking layer ────────────────────────────────────────────────
-        PeerBroadcaster broadcaster =
-                new PeerBroadcaster(finalUserId, "device-" + finalUserId, tcpPort);
+        PeerBroadcaster broadcaster = new PeerBroadcaster(finalUserId, "device-" + finalUserId, tcpPort);
         PeerListener discovery = new PeerListener(finalUserId);
 
         final PeerConnectionManager[] tcpHolder = new PeerConnectionManager[1];
@@ -162,8 +168,10 @@ public class DiscoveryTest {
                         if (isDbActive) {
                             try {
                                 contactRepo.addContact(finalUserId, peerId, null);
-                                contactRepo.updateLastSeen(finalUserId, peerId, new Timestamp(System.currentTimeMillis()));
-                            } catch (SQLException ignored) {}
+                                contactRepo.updateLastSeen(finalUserId, peerId,
+                                        new Timestamp(System.currentTimeMillis()));
+                            } catch (SQLException ignored) {
+                            }
                         }
 
                         // Flush any pending messages buffered while peer was offline
@@ -180,7 +188,8 @@ public class DiscoveryTest {
                                     messageService.markSent(m);
                                     conversationManager.record(peerId, m);
                                     if (isDbActive) {
-                                        contactRepo.updateLastSeen(finalUserId, peerId, new Timestamp(System.currentTimeMillis()));
+                                        contactRepo.updateLastSeen(finalUserId, peerId,
+                                                new Timestamp(System.currentTimeMillis()));
                                     }
                                     System.out.println("  ✓ Sent queued msg: " + m.getPayload());
                                 } catch (IOException e) {
@@ -214,8 +223,10 @@ public class DiscoveryTest {
                             if (isDbActive) {
                                 try {
                                     contactRepo.addContact(finalUserId, peerId, null);
-                                    contactRepo.updateLastSeen(finalUserId, peerId, new Timestamp(System.currentTimeMillis()));
-                                } catch (SQLException ignored) {}
+                                    contactRepo.updateLastSeen(finalUserId, peerId,
+                                            new Timestamp(System.currentTimeMillis()));
+                                } catch (SQLException ignored) {
+                                }
                             }
                             System.out.println();
                             System.out.println("[RECEIVE]");
@@ -248,8 +259,7 @@ public class DiscoveryTest {
                         System.err.println("[ERROR] Peer=" + peerId
                                 + " | " + error.getMessage());
                     }
-                }
-        );
+                });
 
         tcpHolder[0] = tcp;
         tcp.start();
@@ -264,7 +274,8 @@ public class DiscoveryTest {
 
             while (scanner.hasNextLine()) {
                 String line = scanner.nextLine().trim();
-                if (line.isEmpty()) continue;
+                if (line.isEmpty())
+                    continue;
 
                 // Split into at most 3 tokens so the message body is kept whole.
                 String[] parts = line.split("\\s+", 3);
@@ -279,7 +290,7 @@ public class DiscoveryTest {
                                 break;
                             }
                             String peerId = parts[1];
-                            String text   = parts[2];
+                            String text = parts[2];
 
                             // 1. Create & store (CREATED)
                             Message msg = messageService.createChatMessage(
@@ -291,7 +302,7 @@ public class DiscoveryTest {
                             // 3. Transport — update status based on outcome
                             try {
                                 tcp.sendText(peerId, wire);
-                                messageService.markSent(msg);   // SENT
+                                messageService.markSent(msg); // SENT
                                 conversationManager.record(peerId, msg);
 
                                 System.out.println();
@@ -332,8 +343,7 @@ public class DiscoveryTest {
 
                         // ── /peers ────────────────────────────────────────
                         case "/peers": {
-                            List<PeerListener.PeerInfo> known =
-                                    discovery.getKnownPeers();
+                            List<PeerListener.PeerInfo> known = discovery.getKnownPeers();
                             System.out.println();
                             if (known.isEmpty()) {
                                 System.out.println("[PEERS] No peers discovered yet.");
@@ -341,7 +351,8 @@ public class DiscoveryTest {
                                 System.out.println("[PEERS] Known peers:");
                                 for (PeerListener.PeerInfo p : known) {
                                     String status = tcp.isConnected(p.userId)
-                                            ? "CONNECTED" : "DISCOVERED";
+                                            ? "CONNECTED"
+                                            : "DISCOVERED";
                                     System.out.println("  - " + p.userId
                                             + " @ " + p.address.getHostAddress()
                                             + ":" + p.tcpPort
@@ -379,8 +390,7 @@ public class DiscoveryTest {
                                 break;
                             }
                             String peerId = parts[1];
-                            List<Message> history =
-                                    messageService.getMessagesWithPeer(peerId);
+                            List<Message> history = messageService.getMessagesWithPeer(peerId);
                             System.out.println();
                             if (history.isEmpty()) {
                                 System.out.println("[MESSAGES] No messages with "
@@ -510,7 +520,7 @@ public class DiscoveryTest {
                                 break;
                             }
                             String peerId = parts[1];
-                            String text   = "[URGENT] " + parts[2];
+                            String text = "[URGENT] " + parts[2];
 
                             Message msg = messageService.createChatMessage(finalUserId, peerId, text);
                             priorityQueue.insert(msg, MessagePriority.URGENT);
@@ -523,7 +533,8 @@ public class DiscoveryTest {
                                 conversationManager.record(peerId, pm.getMessage());
 
                                 System.out.println();
-                                System.out.println("[SEND - URGENT PRIORITY (Min-Heap Weight: " + pm.getPriority().getWeight() + ")]");
+                                System.out.println("[SEND - URGENT PRIORITY (Min-Heap Weight: "
+                                        + pm.getPriority().getWeight() + ")]");
                                 System.out.println("  Type   : " + pm.getMessage().getType());
                                 System.out.println("  ID     : " + pm.getMessage().getMessageId());
                                 System.out.println("  From   : " + pm.getMessage().getSenderId());
@@ -579,13 +590,14 @@ public class DiscoveryTest {
                                 break;
                             }
                             String from = parts[1];
-                            String to   = parts[2];
+                            String to = parts[2];
                             List<String> path = peerGraph.bfsPath(from, to);
                             System.out.println();
                             if (path.isEmpty()) {
                                 System.out.println("[GRAPH ROUTE] No route found between " + from + " and " + to);
                             } else {
-                                System.out.println("[GRAPH ROUTE - BFS Shortest Path (" + (path.size() - 1) + " hops)]:");
+                                System.out
+                                        .println("[GRAPH ROUTE - BFS Shortest Path (" + (path.size() - 1) + " hops)]:");
                                 System.out.println("  " + String.join(" ──► ", path));
                             }
                             break;
@@ -640,8 +652,8 @@ public class DiscoveryTest {
         System.out.println("╔════════════════════════════════════════════════════════════╗");
         System.out.println("║            MeshLink v0.3 — 8 Data Structures               ║");
         System.out.println("╠════════════════════════════════════════════════════════════╣");
-        System.out.printf ("║  User    : %-46s  ║%n", userId);
-        System.out.printf ("║  Port    : %-46d  ║%n", tcpPort);
+        System.out.printf("║  User    : %-46s  ║%n", userId);
+        System.out.printf("║  Port    : %-46d  ║%n", tcpPort);
         System.out.println("╠════════════════════════════════════════════════════════════╣");
         System.out.println("║ [COMMUNICATION]                                            ║");
         System.out.println("║  /msg <peer> <text>      - Send text message               ║");
